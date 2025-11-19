@@ -1,120 +1,116 @@
-#include <AFMotor.h>
-#include <Servo.h>
+#include <AFMotor.h>        // include motor shield library so we can control motors
+#include <Servo.h>          // include servo library so we can control the servo
 
 // Moters on M1 and M2
-AF_DCMotor motorLeft(1);
-AF_DCMotor motorRight(2);
+AF_DCMotor motorLeft(1);    // create left motor object on port M1
+AF_DCMotor motorRight(2);   // create right motor object on port M2
 
 // Servvo for scannig left/right
-Servo scanServo;
+Servo scanServo;            // create servo object for turning ultrasonic
 
 // Ultrasonic pns
-#define TRIG A1
-#define ECHO A2
+#define TRIG A1             // TRIG pin of ultrasonic connected to A1
+#define ECHO A2             // ECHO pin of ultrasonic connected to A2
 
 // Stuck detction helpres
-int stuckCount = 0;   // keeps incrasing if bot isnt moving proparly
-long lastDist = 0;    // prevous distnce value
+int stuckCount = 0;         // count how many loops bot seems “stuck”
+long lastDist = 0;          // stores previous distance to compare movement
 
 // -----------------------
 // Get distnce in cm
 // -----------------------
-long getDistance() {
+long getDistance() {        // function that measures distance and returns it
 
-  // Send triggr pulss
-  digitalWrite(TRIG, LOW);
-  delayMicroseconds(2);
-  digitalWrite(TRIG, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG, LOW);
+  digitalWrite(TRIG, LOW);           // reset TRIG low
+  delayMicroseconds(2);              // wait 2 microseconds
+  digitalWrite(TRIG, HIGH);          // send trigger pulse high
+  delayMicroseconds(10);             // keep pulse high for 10 microseconds
+  digitalWrite(TRIG, LOW);           // end pulse
 
-  // Read echo with timout (stops freezng)
-  long duration = pulseIn(ECHO, HIGH, 60000); // longer timeout
+  long duration = pulseIn(ECHO, HIGH, 60000);  // measure time echo stays high (max 60ms)
 
-  // Convert microsecs → cm
-  long dist = duration * 0.034 / 2;
+  long dist = duration * 0.034 / 2;  // convert time → distance in cm
 
-  // If bad readng, limit to mx 400 cm
-  if (dist == 0 || dist > 400) dist = 400;
+  if (dist == 0 || dist > 400)       // if reading is invalid or too far
+    dist = 400;                      // set to 400 cm max
 
-  return dist;
+  return dist;                       // give back distance value
 }
 
 // -----------------------
 // Moter helper functons
 // -----------------------
-void forward() {
-  motorLeft.setSpeed(180);
-  motorRight.setSpeed(180);
-  motorLeft.run(FORWARD);
-  motorRight.run(FORWARD);
+void forward() {                     // function to make bot go forward
+  motorLeft.setSpeed(180);           // set left motor speed
+  motorRight.setSpeed(180);          // set right motor speed
+  motorLeft.run(FORWARD);            // left motor moves forward
+  motorRight.run(FORWARD);           // right motor moves forward
 }
 
-void stopBot() {
-  motorLeft.run(RELEASE);
-  motorRight.run(RELEASE);
+void stopBot() {                     // function to stop the bot
+  motorLeft.run(RELEASE);            // stop left motor
+  motorRight.run(RELEASE);           // stop right motor
 }
 
-void turnLeft() {
-  motorLeft.setSpeed(180);
-  motorRight.setSpeed(180);
-  motorLeft.run(BACKWARD);
-  motorRight.run(FORWARD);
-  delay(400);
-  stopBot();
-  delay(150); 
+void turnLeft() {                    // function to turn left
+  motorLeft.setSpeed(180);           // set left motor speed
+  motorRight.setSpeed(180);          // set right motor speed
+  motorLeft.run(BACKWARD);           // left motor goes backwards
+  motorRight.run(FORWARD);           // right motor goes forward
+  delay(400);                        // delay to complete turning
+  stopBot();                         // stop motors after turn
+  delay(150);                        // small rest after turning
 }
 
-void turnRight() {
-  motorLeft.setSpeed(180);
-  motorRight.setSpeed(180);
-  motorLeft.run(FORWARD);
-  motorRight.run(BACKWARD);
-  delay(400);
-  stopBot();
-  delay(150);
+void turnRight() {                   // function to turn right
+  motorLeft.setSpeed(180);           // set left motor speed
+  motorRight.setSpeed(180);          // set right motor speed
+  motorLeft.run(FORWARD);            // left motor goes forward
+  motorRight.run(BACKWARD);          // right motor goes backward
+  delay(400);                        // wait to finish turning
+  stopBot();                         // stop motors
+  delay(150);                        // small break
 }
 
 // -----------------------
 // Detect if bot is stck
 // -----------------------
-void checkStuck(long d) {
+void checkStuck(long d) {            // function to detect if bot is not moving
 
-  // If distnce isnt changng much → bot might be stuk
-  if (abs(d - lastDist) < 5) {
-    stuckCount++;
+  if (abs(d - lastDist) < 5) {       // if distance barely changed
+    stuckCount++;                    // bot might be stuck → increase counter
   } else {
-    stuckCount = 0;
+    stuckCount = 0;                  // distance changed → bot moving normally
   }
 
-  // If stuck too lng → revese out
-  if (stuckCount >= 5) {
-    motorLeft.setSpeed(180);
+  if (stuckCount >= 5) {             // if bot appears stuck for 5 loops
+
+    motorLeft.setSpeed(180);         // set speed for escaping
     motorRight.setSpeed(180);
-    motorLeft.run(BACKWARD);
-    motorRight.run(BACKWARD);
-    delay(500);
+    motorLeft.run(BACKWARD);         // reverse left motor
+    motorRight.run(BACKWARD);        // reverse right motor
+    delay(500);                      // reverse for 0.5 seconds
 
-    stopBot();       // ← FIXED
-    delay(200);
+    stopBot();                       // stop motors
+    delay(200);                      // small delay
 
-    stuckCount = 0;
+    stuckCount = 0;                  // reset stuck counter
   }
 
-  lastDist = d;
+  lastDist = d;                      // save current distance for next loop
 }
 
 // -----------------------
 // Setup runs onnce
 // -----------------------
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(9600);                // start serial monitor at 9600 baud
 
-  pinMode(TRIG, OUTPUT);
-  pinMode(ECHO, INPUT);
+  pinMode(TRIG, OUTPUT);             // TRIG pin is output
+  pinMode(ECHO, INPUT);              // ECHO pin is input
 
-  scanServo.attach(10); 
-  scanServo.write(90);  // cnter positon
+  scanServo.attach(10);              // attach servo to pin 10
+  scanServo.write(90);               // move servo to center (90°)
 }
 
 // -----------------------
@@ -122,35 +118,33 @@ void setup() {
 // -----------------------
 void loop() {
 
-  long front = getDistance();
-  checkStuck(front);
+  long front = getDistance();        // measure distance in front
+  checkStuck(front);                 // check if bot is stuck
 
-  // Path is clr → go forwrd
-  if (front > 30) {
-    forward();
+  if (front > 30) {                  // if obstacle is more than 30 cm away
+    forward();                       // go forward
   } 
-  else {
-    // Obstrcle → stop and scan
-    stopBot();
-    delay(200);
+  else {                             // if something is in front
 
-    // Look left (safer angle)
-    scanServo.write(30);
-    delay(400);
-    long left = getDistance();
+    stopBot();                       // stop the bot
+    delay(200);                      // wait
 
-    // Look right (safer angle)
-    scanServo.write(150);
-    delay(400);
-    long right = getDistance();
+    scanServo.write(30);             // turn servo left
+    delay(400);                      // wait for servo to reach position
+    long left = getDistance();       // read left distance
 
-    // Back to cnter
-    scanServo.write(90);
-    delay(200);
+    scanServo.write(150);            // turn servo right
+    delay(400);                      // wait
+    long right = getDistance();      // read right distance
 
-    if (left > right) turnLeft();
-    else turnRight();
+    scanServo.write(90);             // center the servo
+    delay(200);                      // small pause
+
+    if (left > right)                // if left side has more space
+      turnLeft();                    // turn left
+    else
+      turnRight();                   // otherwise turn right
   }
 
-  delay(50);
+  delay(50);                         // small delay between loops
 }
