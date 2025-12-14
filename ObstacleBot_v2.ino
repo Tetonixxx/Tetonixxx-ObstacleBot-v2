@@ -1,179 +1,130 @@
-#include <AFMotor.h>        // load motor shield library so we can use the motors
-#include <Servo.h>          // load servo library so we can control the servo motor
+#include <AFMotor.h>
+#include <NewPing.h>
+#include <Servo.h>
 
-// Motors on M1 and M2 (these match the ports on the shield)
-AF_DCMotor motorLeft(1);    // left motor is plugged into M1
-AF_DCMotor motorRight(2);   // right motor is plugged into M2
-
-// Servo used to rotate ultrasonic sensor
-Servo scanServo;            // create a servo object
-
-// Ultrasonic pins
-#define TRIG A1             // TRIG pin of sensor connected to analog pin A1
-#define ECHO A2             // ECHO pin of sensor connected to analog pin A2
-
-// Stuck detection variables
-int stuckCount = 0;         // counts how many times distance didn’t change
-long lastDist = 0;          // stores previous distance reading
-
+// --- 🎯 MOTOR CALIBRATION FACTORS (YOU MUST TUNE THESE!) ---
+// If the robot veers RIGHT, reduce LEFT_CALIBRATION (e.g., 255 -> 230)
+// If the robot veers LEFT, reduce RIGHT_CALIBRATION (e.g., 255 -> 230)
+// Start at 255 and reduce the value for the stronger motor until the bot drives straight.
+#define LEFT_CALIBRATION  255 
+#define RIGHT_CALIBRATION 255 
 // ----------------------------------------------------
-// Function: measure distance in front of the robot
-// ----------------------------------------------------
-long getDistance() {
 
-  digitalWrite(TRIG, LOW);  // make TRIG low to reset pulse
-  delayMicroseconds(2);     // wait for 2 microseconds
-  digitalWrite(TRIG, HIGH); // send a short HIGH pulse to trigger the sensor
-  delayMicroseconds(10);    // keep TRIG HIGH for 10 microseconds
-  digitalWrite(TRIG, LOW);  // stop the pulse
+AF_DCMotor motorLeft(1);
+AF_DCMotor motorRight(4);
 
-  // measure how long the ECHO pin stays HIGH (sound travel time)
-  long duration = pulseIn(ECHO, HIGH, 60000); // timeout 60ms so code doesn’t freeze
+#define TRIG_PIN A1
+#define ECHO_PIN A2
+#define MAX_DISTANCE 400
+NewPing sonar(TRIG_PIN, ECHO_PIN, MAX_DISTANCE);
 
-  // convert time into distance (speed of sound formula)
-  long dist = duration * 0.034 / 2;  // distance in cm
+Servo scanServo;
+#define SERVO_PIN 10
 
-  // if distance is invalid or too far, cap it at 400 cm
-  if (dist == 0 || dist > 400)
-    dist = 400;
+// --- Utility Functions ---
 
-  return dist;              // return the final distance value
-}
-
-// ----------------------------------------------------
-// Motor control functions
-// ----------------------------------------------------
-void forward() {
-  Serial.println("Action: FORWARD");  // print what the bot is doing
-
-  motorLeft.setSpeed(180);            // set speed of left motor
-  motorRight.setSpeed(180);           // set speed of right motor
-  motorLeft.run(FORWARD);             // left motor moves forward
-  motorRight.run(FORWARD);            // right motor moves forward
+unsigned int readAvg() {
+  unsigned long sum = 0;
+  for (int i=0; i<3; i++) {
+    unsigned int d = sonar.ping_cm();
+    if (d == 0) d = 400; 
+    sum += d;
+    delay(40); // Delay between pings for stability
+  }
+  return sum / 3;
 }
 
 void stopBot() {
-  Serial.println("Action: STOP");     // tell monitor bot is stopping
-
-  motorLeft.run(RELEASE);             // stop left motor
-  motorRight.run(RELEASE);            // stop right motor
+  motorLeft.run(RELEASE);
+  motorRight.run(RELEASE);
+  delay(150);
 }
 
-void turnLeft() {
-  Serial.println("Action: TURN LEFT");  // print action
-
-  motorLeft.setSpeed(180);              // set both speeds
-  motorRight.setSpeed(180);
-  motorLeft.run(BACKWARD);              // left wheel goes backward
-  motorRight.run(FORWARD);              // right wheel goes forward
-  delay(400);                           // turning time
-  stopBot();                            // stop after turning
-  delay(150);                           // small delay before moving again
+// Full power FORWARD, uses calibration to ensure straight line
+void boostForward(int ms) {
+  motorLeft.setSpeed(LEFT_CALIBRATION);
+  motorRight.setSpeed(RIGHT_CALIBRATION);
+  motorLeft.run(FORWARD);
+  motorRight.run(FORWARD);
+  delay(ms);
 }
 
-void turnRight() {
-  Serial.println("Action: TURN RIGHT"); // print action
-
-  motorLeft.setSpeed(180);              // set both speeds
-  motorRight.setSpeed(180);
-  motorLeft.run(FORWARD);               // left wheel forward
-  motorRight.run(BACKWARD);             // right wheel backward
-  delay(400);                           // turning time
-  stopBot();                            // stop after turning
-  delay(150);                           // small delay
+// Strong reverse to quickly gain distance from obstacle
+void reverseSlow(int ms) {
+  // Use maximum power possible (255) if the low-current batteries allow it, 
+  // adjusted by the calibration factor.
+  motorLeft.setSpeed(LEFT_CALIBRATION); 
+  motorRight.setSpeed(RIGHT_CALIBRATION); 
+  motorLeft.run(BACKWARD);
+  motorRight.run(BACKWARD);
+  delay(ms);
+  stopBot();
 }
 
-// ----------------------------------------------------
-// Stuck detection system
-// ----------------------------------------------------
-void checkStuck(long d) {              // receives current distance value
-
-  // check if distance barely changed from last reading
-  if (abs(d - lastDist) < 5) {
-    stuckCount++;                      // increase stuck counter
-  } else {
-    stuckCount = 0;                    // reset if robot is moving properly
-  }
-
-  // if stuck too many times in a row
-  if (stuckCount >= 5) {
-    Serial.println("⚠ STUCK DETECTED! Reversing..."); // print warning
-
-    motorLeft.setSpeed(180);           // set motor speed
-    motorRight.setSpeed(180);
-    motorLeft.run(BACKWARD);           // reverse both wheels
-    motorRight.run(BACKWARD);
-    delay(500);                        // reverse for 0.5 seconds
-
-    stopBot();                         // stop movement
-    delay(200);                        // short wait
-
-    stuckCount = 0;                    // reset stuck counter
-  }
-
-  lastDist = d;                        // save current distance for next check
+// Aggressive Power Pivot Left (Left drags, Right pushes)
+void pivotLeftPower() {
+  motorLeft.run(RELEASE); 
+  motorRight.setSpeed(RIGHT_CALIBRATION); 
+  motorRight.run(FORWARD);
+  delay(2000);   // AGGRESSIVE DURATION for heavy chassis
+  stopBot();
 }
 
-// ----------------------------------------------------
-// SETUP: runs once at start
-// ----------------------------------------------------
+// Aggressive Power Pivot Right (Right drags, Left pushes)
+void pivotRightPower() {
+  motorRight.run(RELEASE); 
+  motorLeft.setSpeed(LEFT_CALIBRATION); 
+  motorLeft.run(FORWARD);
+  delay(2000); // AGGRESSIVE DURATION for heavy chassis
+  stopBot();
+}
+
+// --- Setup and Loop ---
+
 void setup() {
-  Serial.begin(9600);                  // start serial monitor
-  Serial.println("=== BOT STARTED ==="); // print startup message
-
-  pinMode(TRIG, OUTPUT);               // TRIG pin is output
-  pinMode(ECHO, INPUT);                // ECHO pin is input
-
-  scanServo.attach(10);                // attach servo to pin 10
-  scanServo.write(90);                 // set servo to middle position
+  Serial.begin(9600);
+  scanServo.attach(SERVO_PIN);
+  scanServo.write(90); 
+  stopBot();
 }
 
-// ----------------------------------------------------
-// MAIN LOOP: runs forever
-// ----------------------------------------------------
 void loop() {
+  scanServo.write(90);
+  delay(200);
+  unsigned int front = readAvg();
 
-  long front = getDistance();          // get distance ahead of robot
-  Serial.print("Front: ");             // print label
-  Serial.print(front);                 // print distance
-  Serial.print(" cm | StuckCount: ");  // print stuck counter label
-  Serial.println(stuckCount);          // print stuck counter value
-
-  checkStuck(front);                   // check if robot seems stuck
-
-  // if nothing close in front
-  if (front > 30) {
-    forward();                         // drive forward
-  } 
-  else {                               // obstacle detected
-    Serial.println("Obstacle ahead → scanning..."); // show message
-
-    stopBot();                         // stop
-    delay(200);                        // brief delay
-
-    scanServo.write(30);               // turn sensor to left side
-    delay(400);                        // wait for servo
-    long left = getDistance();         // measure left distance
-    Serial.print("Left: ");
-    Serial.print(left);
-    Serial.println(" cm");
-
-    scanServo.write(150);              // turn sensor to right
-    delay(400);                        // wait
-    long right = getDistance();        // measure right distance
-    Serial.print("Right: ");
-    Serial.print(right);
-    Serial.println(" cm");
-
-    scanServo.write(90);               // center servo again
-    delay(200);                        // wait
-
-    // choose better direction
-    if (left > right)
-      turnLeft();                      // more space on left
-    else
-      turnRight();                     // more space on right
+  // 1. Go Forward if Clear
+  if (front > 30) { 
+    boostForward(80);
+    return;
   }
 
-  delay(50);                           // small delay for stability
+  // 2. Stop and Reverse
+  stopBot();
+  reverseSlow(400);  // Reverse before scan
+
+  // 3. Scan Left
+  scanServo.write(30);
+  delay(450);
+  unsigned int left = readAvg();
+
+  // 4. Scan Right
+  scanServo.write(150);
+  delay(450);
+  unsigned int right = readAvg();
+
+  scanServo.write(90); // Return servo to center
+  delay(200);
+
+  // 5. Decision Making
+  // Use a safety buffer (5cm) to prevent flickering
+  if (left > right + 5) {
+    pivotLeftPower();
+  } else if (right > left + 5) {
+    pivotRightPower();
+  } else {
+    // If distances are similar (dead-end), reverse again and choose a default turn.
+    reverseSlow(500); 
+    pivotRightPower(); // Default turn bias is Right
+  }
 }
